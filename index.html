@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>聖焰裁決：災厄對策本部 - 互動系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #1a1c2c;
+            color: #e2e8f0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            cursor: grab;
+            position: relative;
+        }
+        #canvas-container:active {
+            cursor: grabbing;
+        }
+        .game-ui {
+            pointer-events: none;
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 2rem;
+            z-index: 10;
+        }
+        .interactive {
+            pointer-events: auto;
+        }
+        .panel-glass {
+            background: rgba(20, 20, 35, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 140, 0, 0.4);
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.7);
+        }
+        .glow-text {
+            text-shadow: 0 0 15px rgba(255, 140, 0, 0.9);
+        }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 140, 0, 0.3); border-radius: 10px; }
+        
+        .scanline {
+            width: 100%;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.05);
+            position: absolute;
+            top: 0; left: 0;
+            animation: scan 8s linear infinite;
+            pointer-events: none;
+            z-index: 5;
+        }
+        @keyframes scan { 0% { top: -10%; } 100% { top: 110%; } }
+
+        .loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: #1a1c2c;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            transition: opacity 1s ease;
+        }
+        .loading-dots:after {
+            content: '.';
+            animation: dots 1s steps(5, end) infinite;
+        }
+        @keyframes dots { 0%, 20% { content: '.'; } 40% { content: '..'; } 60% { content: '...'; } 80%, 100% { content: ''; } }
+    </style>
+</head>
+<body>
+
+    <!-- 加載畫面 -->
+    <div id="loading-screen" class="loading-overlay">
+        <div class="text-orange-400 font-bold tracking-widest text-xl mb-4 glow-text">建立商業帝國中</div>
+        <div class="text-xs text-gray-400 uppercase tracking-tighter">正在調用 Imagen 核心繪製帝國版圖<span class="loading-dots"></span></div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="gameCanvas"></canvas>
+        <div class="scanline"></div>
+    </div>
+
+    <div class="game-ui">
+        <!-- 上方資訊列 -->
+        <div class="flex justify-between items-start">
+            <div class="panel-glass p-5 rounded-lg interactive border-l-4 border-orange-500">
+                <h1 class="text-2xl font-bold glow-text tracking-widest text-orange-400">聖焰裁決：災厄對策本部</h1>
+                <p class="text-xs text-gray-300 mt-1 uppercase tracking-widest text-[10px]">Taipei Fire Dept. Training Center // Empire System</p>
+            </div>
+            
+            <div class="panel-glass p-4 rounded-lg interactive text-right">
+                <div id="clock" class="text-xl font-mono text-orange-300">00:00:00</div>
+                <div class="text-[10px] text-gray-400 uppercase tracking-widest">戰區標準時間 (TST)</div>
+            </div>
+        </div>
+
+        <!-- 右側資訊面板 -->
+        <div class="flex justify-end h-[80vh] py-8 items-center">
+            <div id="info-panel" class="panel-glass w-[400px] p-6 rounded-xl interactive translate-x-[120%] transition-transform duration-500 ease-out flex flex-col max-h-full overflow-y-auto">
+                <div class="flex items-center gap-4 mb-4 flex-shrink-0">
+                    <div id="info-icon" class="text-4xl bg-orange-900/20 p-2 rounded-lg border border-orange-400/30">🔥</div>
+                    <div>
+                        <h2 id="info-title" class="text-xl font-bold text-orange-400">區域選擇</h2>
+                        <p id="info-subtitle" class="text-[10px] text-gray-400 uppercase tracking-tighter">Waiting for Command...</p>
+                    </div>
+                </div>
+                <div class="h-[1px] bg-gradient-to-r from-orange-400/50 to-transparent mb-4 flex-shrink-0"></div>
+                
+                <div id="info-content" class="text-sm leading-relaxed text-gray-200 space-y-3 mb-6">
+                    請在地圖上選擇一個戰略節點，以獲取該單位的詳細職責。
+                </div>
+
+                <!-- Gemini AI 功能區 -->
+                <div id="gemini-section" class="hidden space-y-4 pt-4 border-t border-orange-900/40">
+                    <div class="text-[10px] text-orange-300/70 font-bold tracking-widest uppercase mb-2">Gemini 戰術整合核心</div>
+                    <div class="flex gap-2">
+                        <button onclick="generateTrial()" class="flex-1 py-2 bg-orange-500/10 border border-orange-500/40 hover:bg-orange-500/30 text-orange-300 text-[10px] font-bold transition-all uppercase rounded">
+                            ✨ 啟動模擬試煉
+                        </button>
+                        <button onclick="askStrategy()" class="flex-1 py-2 bg-blue-500/10 border border-blue-500/40 hover:bg-blue-500/30 text-blue-300 text-[10px] font-bold transition-all uppercase rounded">
+                            ✨ 獲取戰略分析
+                        </button>
+                    </div>
+                    
+                    <div id="ai-response-container" class="hidden mt-4 p-4 bg-black/50 border border-orange-500/10 rounded text-xs text-gray-300 leading-relaxed overflow-hidden">
+                        <div id="ai-loading" class="hidden items-center gap-2">
+                            <span class="loading-dots text-orange-400">正在同步雲端指令</span>
+                        </div>
+                        <div id="ai-text" class="whitespace-pre-wrap"></div>
+                    </div>
+                </div>
+
+                <div class="mt-6 pt-4 border-t border-gray-700 flex-shrink-0">
+                    <button onclick="closePanel()" class="w-full py-2 bg-gray-800/50 border border-gray-600 hover:bg-gray-700 text-gray-400 text-[10px] font-bold transition-all uppercase tracking-widest">
+                        終止通訊
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 下方狀態列 -->
+        <div class="flex justify-between items-end">
+            <div class="panel-glass p-3 rounded-md interactive flex gap-6 text-[10px]">
+                <div class="flex flex-col"><span class="text-gray-500 uppercase">System Status</span><span id="sys-status" class="text-green-400 font-bold">ONLINE</span></div>
+                <div class="flex flex-col"><span class="text-gray-500 uppercase">Unit Count</span><span id="unit-count" class="text-blue-300 font-bold">--</span></div>
+                <div class="flex flex-col"><span class="text-gray-500 uppercase">Visual Layer</span><span id="bg-status" class="text-orange-400 font-bold">LOADING</span></div>
+            </div>
+            <div class="text-[10px] text-gray-500 text-right font-mono">
+                SECURED BY FLAME RITUAL V2.5 // TFD EMPIRE EDITION
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const apiKey = ""; 
+        const TEXT_MODEL = "gemini-2.5-flash-preview-09-2025";
+        const IMAGE_MODEL = "imagen-4.0-generate-001"; // 使用專用影像模型
+
+        // 封裝重試邏輯的 API 調用
+        async function fetchWithRetry(url, payload) {
+            const maxRetries = 5;
+            let delay = 1000;
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+                    return await response.json();
+                } catch (error) {
+                    if (i === maxRetries - 1) throw error;
+                    await new Promise(r => setTimeout(r, delay));
+                    delay *= 2;
+                }
+            }
+        }
+
+        async function callGemini(prompt, systemInstruction = "") {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`;
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined
+            };
+            return await fetchWithRetry(url, payload);
+        }
+
+        async function generateBackgroundImage() {
+            // 使用 Imagen 4.0 預測端點
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:predict?key=${apiKey}`;
+            
+            // 提示詞深度借鑒上傳影片中的「商業帝國」風格
+            const prompt = `A vibrant 2D hand-drawn fantasy game map background with isometric floating islands. 
+            Detailed landscape inspired by an 'Empire' tycoon game. 
+            - Center island: A large magnificent medieval stone castle with orange roofs.
+            - Top-left island: A golden Greek Parthenon-style temple.
+            - Top-right island: A giant ancient glowing world tree with green foliage.
+            - Bottom-right island: An industrial port with steampunk-style bronze pipes, a red and white lighthouse, and a workshop.
+            - Bottom-left area: Magic archway portals and glowing crystal clusters.
+            Blue clear sky with soft white clouds, bright daytime lighting, clean mobile game UI art style.`;
+            
+            const payload = {
+                instances: [{ prompt: prompt }],
+                parameters: { sampleCount: 1 }
+            };
+
+            try {
+                const result = await fetchWithRetry(url, payload);
+                const bytesBase64Encoded = result.predictions?.[0]?.bytesBase64Encoded;
+                if (bytesBase64Encoded) {
+                    const img = new Image();
+                    img.src = `data:image/png;base64,${bytesBase64Encoded}`;
+                    await img.decode();
+                    return img;
+                }
+            } catch (error) {
+                console.error("Background Generation Error:", error);
+                return null;
+            }
+        }
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const infoPanel = document.getElementById('info-panel');
+        
+        let width, height;
+        let offset = { x: 0, y: 0 };
+        let hoveredId = null;
+        let selectedNodeId = null;
+        let time = 0;
+        let bgImage = null;
+
+        const characters = [];
+        const charIcons = ['🛡️', '🧙', '👷', '🚑', '⚔️', '🔥'];
+
+        // 遊戲角色類別
+        class Character {
+            constructor() {
+                this.icon = charIcons[Math.floor(Math.random() * charIcons.length)];
+                this.nodeIndex = Math.floor(Math.random() * mapNodes.length);
+                const startNode = mapNodes[this.nodeIndex];
+                this.x = startNode.x;
+                this.y = startNode.y;
+                this.targetNodeIndex = this.nodeIndex;
+                this.speed = 0.4 + Math.random() * 0.4;
+                this.waitTimer = 0;
+                this.state = 'waiting'; 
+            }
+
+            update() {
+                if (this.state === 'waiting') {
+                    this.waitTimer--;
+                    if (this.waitTimer <= 0) {
+                        this.targetNodeIndex = Math.floor(Math.random() * mapNodes.length);
+                        this.state = 'moving';
+                    }
+                } else {
+                    const target = mapNodes[this.targetNodeIndex];
+                    const dx = target.x - this.x;
+                    const dy = target.y - this.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+
+                    if (dist < 5) {
+                        this.x = target.x;
+                        this.y = target.y;
+                        this.state = 'waiting';
+                        this.waitTimer = 150 + Math.random() * 200;
+                    } else {
+                        this.x += (dx / dist) * this.speed;
+                        this.y += (dy / dist) * this.speed;
+                    }
+                }
+            }
+
+            draw() {
+                const screenX = offset.x + this.x;
+                const screenY = offset.y + this.y;
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.beginPath();
+                ctx.ellipse(screenX, screenY + 12, 10, 5, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.font = '24px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.icon, screenX, screenY - (Math.abs(Math.sin(time * 6)) * 6)); 
+            }
+        }
+
+        // 戰略節點定義
+        const mapNodes = [
+            { id: 'center', name: '紅蓮議事廳', subtitle: '核心王座', icon: '👑', color: '#ff4500', x: 0, y: -20, radius: 70, content: '• 綜理訓練中心全盤業務<br>• 督導教育與訓練進修規劃<br>• 核心決策與公文最高裁決' },
+            { id: 'fire_train', name: '業火煉獄', subtitle: '實戰試煉', icon: '🔥', color: '#ff8c00', x: -220, y: 120, radius: 55, content: '• 真火搶救戰術模擬訓練<br>• 燃燒室教官團培訓<br>• 極限環境體能壓力測試' },
+            { id: 'rescue', name: '深淵救贖', subtitle: '鋼鐵意志', icon: '⚔️', color: '#4facfe', x: -280, y: -100, radius: 60, content: '• 急流與進階救生<br>• 扭曲鋼鐵：車禍重型機具救援<br>• 高空繩索索降戰技訓練' },
+            { id: 'scba', name: '生命聖所', subtitle: '呼吸維護', icon: '🌬️', color: '#00f2fe', x: -80, y: 220, radius: 45, content: '• 呼吸器(SCBA)精密維修管理<br>• 純淨空氣壓縮站點營運<br>• 戰場呼吸戰術培訓' },
+            { id: 'edu', name: '真理圖書館', subtitle: '升格之路', icon: '📜', color: '#fee140', x: 220, y: -60, radius: 55, content: '• 升遷之路：警大與官科考試<br>• 語言魔咒：英檢與國外進修<br>• 知識傳承與獎學金審核' },
+            { id: 'soul', name: '修復之泉', subtitle: '靈魂洗滌', icon: '💎', color: '#cd9cf2', x: 280, y: 150, radius: 50, content: '• 創傷修復與靈魂洗滌<br>• 戰士壓力緩解諮商<br>• 安心服務與心理衛生教育' },
+            { id: 'beast', name: '馱獸工坊', subtitle: '器械整備', icon: '🚜', color: '#a1c4fd', x: 100, y: 260, radius: 50, content: '• 公務馱獸保養維護<br>• 戰略物資與財產清點<br>• 後勤馬達與器材修配' }
+        ];
+
+        function resize() {
+            width = window.innerWidth; height = window.innerHeight;
+            canvas.width = width; canvas.height = height;
+            offset.x = width * 0.5; offset.y = height * 0.45;
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        // 系統初始化
+        async function init() {
+            for(let i = 0; i < 8; i++) characters.push(new Character());
+            const unitEl = document.getElementById('unit-count');
+            if (unitEl) unitEl.innerText = characters.length;
+            
+            // 生成背景圖
+            bgImage = await generateBackgroundImage();
+            
+            const loadingScreen = document.getElementById('loading-screen');
+            if (loadingScreen) {
+                loadingScreen.style.opacity = '0';
+                setTimeout(() => loadingScreen.remove(), 1000);
+            }
+
+            const bgStatusEl = document.getElementById('bg-status');
+            if (bgStatusEl) {
+                bgStatusEl.innerText = bgImage ? 'SYNCED' : 'OFFLINE';
+                bgStatusEl.className = bgImage ? 'text-blue-400 font-bold' : 'text-red-500 font-bold';
+            }
+            draw();
+        }
+
+        // 主繪製循環
+        function draw() {
+            time += 0.01;
+            ctx.fillStyle = '#1a1c2c';
+            ctx.fillRect(0, 0, width, height);
+
+            // 繪製帝國底圖 (高透明度還原影片感)
+            if (bgImage) {
+                ctx.save();
+                ctx.globalAlpha = 0.85; 
+                const aspect = bgImage.width / bgImage.height;
+                let drawW = width;
+                let drawH = width / aspect;
+                if (drawH < height) { drawH = height; drawW = height * aspect; }
+                ctx.drawImage(bgImage, (width - drawW) / 2, (height - drawH) / 2, drawW, drawH);
+                ctx.restore();
+            }
+            
+            drawGrid();
+
+            // 節點連線 (虛線)
+            mapNodes.forEach(node => {
+                const targetX = offset.x + node.x; const targetY = offset.y + node.y;
+                const centerX = offset.x; const centerY = offset.y - 20;
+                ctx.beginPath(); ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                ctx.lineWidth = 2; ctx.setLineDash([8, 8]);
+                ctx.moveTo(centerX, centerY); ctx.lineTo(targetX, targetY); ctx.stroke();
+                ctx.setLineDash([]);
+            });
+
+            // 角色繪製
+            characters.forEach(char => {
+                char.update();
+                char.draw();
+            });
+
+            // 節點繪製 (球體光感)
+            mapNodes.forEach(node => {
+                const isHovered = hoveredId === node.id;
+                const floatOffset = Math.sin(time + mapNodes.indexOf(node)) * 5;
+                const targetX = offset.x + node.x;
+                const targetY = offset.y + node.y + floatOffset;
+                
+                // 光暈
+                ctx.beginPath();
+                const grad = ctx.createRadialGradient(targetX, targetY, 0, targetX, targetY, node.radius * (isHovered ? 2 : 1.5));
+                grad.addColorStop(0, node.color + '77'); grad.addColorStop(1, 'transparent');
+                ctx.fillStyle = grad; ctx.arc(targetX, targetY, node.radius * 2, 0, Math.PI * 2); ctx.fill();
+
+                // 本體
+                ctx.beginPath(); ctx.arc(targetX, targetY, node.radius, 0, Math.PI * 2);
+                ctx.fillStyle = isHovered ? node.color : 'rgba(30, 30, 50, 0.9)';
+                ctx.strokeStyle = '#ffffff'; ctx.lineWidth = isHovered ? 5 : 2;
+                ctx.fill(); ctx.stroke();
+
+                ctx.font = `${node.radius * 0.6}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(node.icon, targetX, targetY);
+
+                ctx.font = 'bold 14px "Segoe UI"'; ctx.fillStyle = '#ffffff';
+                ctx.fillText(node.name, targetX, targetY + node.radius + 20);
+            });
+            requestAnimationFrame(draw);
+        }
+
+        function drawGrid() {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)'; ctx.lineWidth = 1;
+            const step = 100;
+            for(let i = 0; i < width; i += step) {
+                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke();
+            }
+            for(let i = 0; i < height; i += step) {
+                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke();
+            }
+        }
+
+        // 滑鼠與點擊交互
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left; const mouseY = e.clientY - rect.top;
+            hoveredId = null;
+            mapNodes.forEach(node => {
+                const floatOffset = Math.sin(time + mapNodes.indexOf(node)) * 5;
+                const dx = mouseX - (offset.x + node.x);
+                const dy = mouseY - (offset.y + node.y + floatOffset);
+                if (Math.sqrt(dx*dx + dy*dy) < node.radius) hoveredId = node.id;
+            });
+            canvas.style.cursor = hoveredId ? 'pointer' : 'grab';
+        });
+
+        canvas.addEventListener('click', () => {
+            if (hoveredId) {
+                selectedNodeId = hoveredId;
+                const node = mapNodes.find(n => n.id === hoveredId);
+                showInfo(node);
+            } else { closePanel(); }
+        });
+
+        function showInfo(node) {
+            const iconEl = document.getElementById('info-icon');
+            const titleEl = document.getElementById('info-title');
+            const subTitleEl = document.getElementById('info-subtitle');
+            const contentEl = document.getElementById('info-content');
+            const geminiSec = document.getElementById('gemini-section');
+            if (iconEl) { iconEl.innerText = node.icon; iconEl.style.borderColor = node.color; }
+            if (titleEl) { titleEl.innerText = node.name; titleEl.style.color = node.color; }
+            if (subTitleEl) subTitleEl.innerText = 'SECURE SECTOR: ' + node.id.toUpperCase();
+            if (contentEl) contentEl.innerHTML = node.content;
+            if (geminiSec) geminiSec.classList.remove('hidden');
+            clearAIResponse();
+            if (infoPanel) infoPanel.classList.remove('translate-x-[120%]');
+        }
+
+        function closePanel() { if (infoPanel) infoPanel.classList.add('translate-x-[120%]'); selectedNodeId = null; }
+        
+        function clearAIResponse() {
+            const container = document.getElementById('ai-response-container');
+            const textEl = document.getElementById('ai-text');
+            if (container) container.classList.add('hidden');
+            if (textEl) textEl.innerText = "";
+        }
+
+        // AI 功能實作
+        async function generateTrial() {
+            if (!selectedNodeId) return;
+            const node = mapNodes.find(n => n.id === selectedNodeId);
+            const container = document.getElementById('ai-response-container');
+            const loader = document.getElementById('ai-loading');
+            const textEl = document.getElementById('ai-text');
+            if (container) container.classList.remove('hidden'); 
+            if (loader) loader.classList.remove('hidden'); 
+            if (textEl) textEl.innerText = "";
+            const systemPrompt = "你是一位冷靜、專業且帶有中二風格的『災厄對策本部戰略 AI』。使用繁體中文。";
+            const prompt = `當前戰區節點：『${node.name}』。請針對此區域生成一個模擬災厄試煉，包含任務代號、危險等級、環境描述及三個具體行動指令。`;
+            try {
+                const result = await callGemini(prompt, systemPrompt);
+                const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || "核心連線異常。";
+                if (loader) loader.classList.add('hidden');
+                if (textEl) textEl.innerText = text;
+            } catch (err) { if (loader) loader.classList.add('hidden'); if (textEl) textEl.innerText = "連線異常，請重新嘗試。"; }
+        }
+
+        async function askStrategy() {
+            if (!selectedNodeId) return;
+            const node = mapNodes.find(n => n.id === selectedNodeId);
+            const container = document.getElementById('ai-response-container');
+            const loader = document.getElementById('ai-loading');
+            const textEl = document.getElementById('ai-text');
+            if (container) container.classList.remove('hidden'); 
+            if (loader) loader.classList.remove('hidden'); 
+            if (textEl) textEl.innerText = "";
+            const systemPrompt = "你是一位資深的消防戰略顧問與訓練教官。使用繁體中文。";
+            const prompt = `分析『${node.name}』單位的職能關鍵點，並提供一項基於最新戰術趨勢的改進建議。`;
+            try {
+                const result = await callGemini(prompt, systemPrompt);
+                const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || "解析模組損壞。";
+                if (loader) loader.classList.add('hidden');
+                if (textEl) textEl.innerText = text;
+            } catch (err) { if (loader) loader.classList.add('hidden'); if (textEl) textEl.innerText = "分析中斷。"; }
+        }
+
+        // 時間更新
+        setInterval(() => {
+            const clockEl = document.getElementById('clock');
+            if (clockEl) {
+                const now = new Date();
+                clockEl.innerText = now.toTimeString().split(' ')[0];
+            }
+        }, 1000);
+
+        window.onload = init;
+    </script>
+</body>
+</html>
